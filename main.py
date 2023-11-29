@@ -1,41 +1,14 @@
-import requests
-import boto3
-import pandas as pd
-from datetime import datetime, timedelta
+from tasks import *
 
-s3 = boto3.client('s3')
-bucket = 'carbon-intensity-project'
+bucket, headers, date = s3_preamble()
 
-headers = {
-    'Accept': 'application/json',
-}
+df_1 = get_or_create_csv_on_s3(bucket, date)
 
-date = datetime.today().strftime('%Y-%m-%d')
+request = make_request(date, headers)
 
-try:
-    df = pd.read_csv(f's3://{bucket}/carbon_intensity/national/carbon_intensity_{date}.csv')
-    
-except FileNotFoundError:
-    df = pd.DataFrame(columns = ['time_from', 'time_to', 'forecast_intensity', 'actual_intensity', 'index_intensity'])
+row = get_data(request)
 
-time_from, time_to, forecast_intensity, actual_intensity, index_intensity = [], [], [], [], []
-request = requests.get(f'https://api.carbonintensity.org.uk/intensity/date/{date}', params = {}, headers = headers)
-for period in range(0, 47):
-    r = request.json()['data'][period]
-    forecast = r['intensity']['forecast']
-    actual = r['intensity']['actual']
-    if forecast and pd.isna(actual) and not time_to:
-        r = request.json()['data'][period-1]
-        forecast = r['intensity']['forecast']
-        actual = r['intensity']['actual']
-        time_from.append(r['from'])
-        time_to.append(r['to'])
-        forecast_intensity.append(forecast)
-        actual_intensity.append(actual)
-        index_intensity.append(r['intensity']['index'])
+df_2 = append_new_row(df_1, row)
 
-df_2 = pd.DataFrame(zip(time_to, time_to, forecast_intensity, actual_intensity, index_intensity), 
-columns = ['time_from', 'time_to', 'forecast_intensity', 'actual_intensity', 'index_intensity'])
-df = pd.concat([df, df_2], ignore_index=True)
+upload_csv_to_s3(df_2, bucket, date)
 
-df.to_csv(f's3://{bucket}/carbon_intensity/national/carbon_intensity_{date}.csv', index=False)
